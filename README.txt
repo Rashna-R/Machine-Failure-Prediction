@@ -28,3 +28,4 @@ The application predicts:
 2. No Machine Failure
 
 The Streamlit application also provides an AI-based explanation and recommendation based on the prediction.
+Live Demo: [paste your Streamlit URL here]
