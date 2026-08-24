@@ -28,4 +28,4 @@ The application predicts:
 2. No Machine Failure
 
 The Streamlit application also provides an AI-based explanation and recommendation based on the prediction.
-Live Demo: https://github.com/Rashna-R/Machine-Failure-Prediction/blob/main/streamlit_app.py
+Live Demo:https://machine-failure-prediction-e5sefslugteb2uh5qxthvr.streamlit.app/
