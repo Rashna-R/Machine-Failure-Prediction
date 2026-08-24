@@ -31,7 +31,7 @@ if st.button("Predict"):
 
     # Display result
     # Display result
-if prediction == 1:
+    if prediction == 1:
     st.error("⚠️ Machine Failure Detected")
 
     st.subheader("🤖 AI Explanation")
