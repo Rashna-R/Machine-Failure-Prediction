@@ -73,6 +73,7 @@ When SHAP is enabled, the application also provides detailed feature contributio
 - Streamlit
 - Matplotlib
 
-## Live Demo
+## Live Demo : https://machine-failure-prediction-e5sefslugteb2uh5qxthvr.streamlit.app/
+
 
 
