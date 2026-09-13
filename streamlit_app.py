@@ -2,10 +2,12 @@ import streamlit as st
 import pandas as pd
 import pickle
 import shap
+import ollama
 
-# -------------------------------------------------
-# PAGE CONFIG
-# -------------------------------------------------
+
+# =====================================================
+# PAGE CONFIGURATION
+# =====================================================
 
 st.set_page_config(
     page_title="Machine Failure Prediction",
@@ -13,18 +15,148 @@ st.set_page_config(
     layout="centered"
 )
 
-# -------------------------------------------------
-# LOAD MODEL
-# -------------------------------------------------
+
+# =====================================================
+# LOAD FINAL MODEL
+# =====================================================
 
 MODEL_PATH = "xgboost_machine_failure_model.pkl"
 
 with open(MODEL_PATH, "rb") as file:
     model = pickle.load(file)
 
-# -------------------------------------------------
-# TITLE
-# -------------------------------------------------
+
+# =====================================================
+# GENERATE AI EXPLANATION USING LOCAL OLLAMA
+# =====================================================
+
+def generate_ai_explanation(
+    prediction,
+    probability,
+    input_data,
+    shap_df
+):
+
+    machine_status = (
+        "Machine Failure Detected"
+        if prediction == 1
+        else "No Machine Failure"
+    )
+
+    machine_parameters = input_data.to_dict(
+        orient="records"
+    )[0]
+
+    shap_information = []
+
+    for _, row in shap_df.iterrows():
+
+        shap_information.append(
+            f"{row['Feature']}: "
+            f"SHAP value = {row['SHAP Value']:.4f}"
+        )
+
+    shap_text = "\n".join(shap_information)
+
+
+    # -------------------------------------------------
+    # LLM Prompt
+    # -------------------------------------------------
+
+    prompt = f"""
+You are an AI-based industrial predictive maintenance assistant.
+
+Analyze the machine prediction using ONLY the information
+provided below.
+
+Machine Status:
+{machine_status}
+
+Failure Probability:
+{probability * 100:.2f}%
+
+Machine Parameters:
+{machine_parameters}
+
+SHAP Feature Contributions:
+{shap_text}
+
+
+SHAP Interpretation Rules:
+
+1. A positive SHAP value means that the feature's current
+   value pushes the model prediction toward Machine Failure.
+
+2. A negative SHAP value means that the feature's current
+   value pushes the model prediction toward No Machine Failure.
+
+3. SHAP values describe the contribution of the CURRENT
+   feature value to this specific prediction.
+
+4. Do NOT claim that increasing a feature will necessarily
+   increase or decrease failure probability unless this
+   relationship is directly supported by the provided data.
+
+5. Do NOT interpret a negative SHAP value as evidence that
+   a higher feature value causes higher failure risk.
+
+6. Do not invent sensor readings, failure causes, thresholds,
+   measurements, or machine conditions that are not provided.
+
+7. When discussing risk factors, identify features with
+   positive SHAP values.
+
+8. When discussing protective factors, identify features with
+   negative SHAP values.
+
+
+Generate a concise response with these sections:
+
+1. Explanation
+
+Explain why the model produced the current prediction,
+using the most important SHAP feature contributions.
+
+2. Risk Factors
+
+Mention the features with positive SHAP values that are
+currently pushing the prediction toward Machine Failure.
+
+3. Maintenance Recommendation
+
+Give practical preventive maintenance recommendations
+based ONLY on the available machine parameters and SHAP
+contributions.
+
+Do not claim that the model has detected a specific
+mechanical fault unless such information is explicitly
+provided.
+
+Keep the response suitable for an industrial monitoring
+application.
+"""
+
+
+    # -------------------------------------------------
+    # Local Ollama LLM
+    # -------------------------------------------------
+
+    response = ollama.chat(
+        model="llama3.2:3b",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+
+    return response["message"]["content"]
+
+
+# =====================================================
+# APPLICATION TITLE
+# =====================================================
 
 st.title("⚙️ Machine Failure Prediction")
 
@@ -33,9 +165,10 @@ st.write(
     "whether machine failure may occur."
 )
 
-# -------------------------------------------------
+
+# =====================================================
 # INPUT PARAMETERS
-# -------------------------------------------------
+# =====================================================
 
 air_temperature = st.number_input(
     "Air Temperature (K)",
@@ -77,92 +210,207 @@ tool_wear = st.number_input(
     step=1.0
 )
 
-# -------------------------------------------------
-# SHAP TOGGLE
-# -------------------------------------------------
+
+# =====================================================
+# SHAP OPTION
+# =====================================================
 
 show_shap = st.toggle(
     "🔍 Show SHAP Explanation",
     value=False
 )
 
-# -------------------------------------------------
+
+# =====================================================
 # PREDICTION
-# -------------------------------------------------
+# =====================================================
 
 if st.button("Predict"):
 
-    # Input data
+    # -------------------------------------------------
+    # Feature Engineering
+    # -------------------------------------------------
+
+    temperature_difference = (
+        process_temperature - air_temperature
+    )
+
+    load_speed_index = (
+        torque * rotational_speed
+    )
+
+
+    # -------------------------------------------------
+    # Prepare Input Data
+    # -------------------------------------------------
+
     input_data = pd.DataFrame({
-        "Air temperature K": [air_temperature],
-        "Process temperature K": [process_temperature],
-        "Rotational speed rpm": [rotational_speed],
-        "Torque Nm": [torque],
-        "Tool wear min": [tool_wear]
+
+        "Air_Temperature_K": [
+            air_temperature
+        ],
+
+        "Process_Temperature_K": [
+            process_temperature
+        ],
+
+        "Rotational_Speed_rpm": [
+            rotational_speed
+        ],
+
+        "Torque_Nm": [
+            torque
+        ],
+
+        "Tool_Wear_min": [
+            tool_wear
+        ],
+
+        "Temperature_Difference_K": [
+            temperature_difference
+        ],
+
+        "Load_Speed_Index": [
+            load_speed_index
+        ]
     })
 
-    # -------------------------------------------------
-    # MATCH MODEL FEATURE ORDER
-    # -------------------------------------------------
-
-    try:
-        model_features = model.get_booster().feature_names
-
-        if model_features:
-            input_data = input_data[model_features]
-
-    except Exception:
-        pass
 
     # -------------------------------------------------
-    # MODEL PREDICTION
+    # Model Feature Order
     # -------------------------------------------------
 
-    prediction = model.predict(input_data)[0]
+    model_features = [
+
+        "Air_Temperature_K",
+
+        "Process_Temperature_K",
+
+        "Rotational_Speed_rpm",
+
+        "Torque_Nm",
+
+        "Tool_Wear_min",
+
+        "Temperature_Difference_K",
+
+        "Load_Speed_Index"
+    ]
+
+    input_data = input_data[
+        model_features
+    ]
+
 
     # -------------------------------------------------
-    # RESULT
+    # Model Prediction
     # -------------------------------------------------
+
+    prediction = int(
+        model.predict(input_data)[0]
+    )
+
+    probability = float(
+        model.predict_proba(input_data)[0][1]
+    )
+
+
+    # -------------------------------------------------
+    # SHAP Analysis
+    # -------------------------------------------------
+
+    explainer = shap.TreeExplainer(model)
+
+    shap_values = explainer.shap_values(
+        input_data
+    )
+
+
+    if isinstance(shap_values, list):
+
+        shap_values = shap_values[-1]
+
+
+    if len(shap_values.shape) > 1:
+
+        shap_values = shap_values[0]
+
+
+    shap_df = pd.DataFrame({
+
+        "Feature": input_data.columns,
+
+        "SHAP Value": shap_values
+    })
+
+
+    shap_df["Impact"] = (
+        shap_df["SHAP Value"].abs()
+    )
+
+
+    shap_df = shap_df.sort_values(
+        "Impact",
+        ascending=False
+    ).reset_index(drop=True)
+
+
+    # =================================================
+    # FAILURE PROBABILITY
+    # =================================================
+
+    st.metric(
+        "Failure Probability",
+        f"{probability * 100:.2f}%"
+    )
+
+
+    # =================================================
+    # PREDICTION RESULT
+    # =================================================
 
     if prediction == 1:
 
-        st.error("⚠️ Machine Failure Detected")
-
-        st.subheader("🤖 AI Explanation")
-
-        st.write(
-            "The machine is predicted to fail based on the given "
-            "operating conditions. The current operating parameters "
-            "show conditions that may increase the possibility of "
-            "machine failure."
-        )
-
-        st.subheader("🔧 Recommendation")
-
-        st.write(
-            "Inspect the machine and tool condition immediately. "
-            "Check for excessive tool wear, abnormal temperature, "
-            "torque and rotational speed. Preventive maintenance "
-            "is recommended."
+        st.error(
+            "⚠️ Machine Failure Detected"
         )
 
     else:
 
-        st.success("✅ No Machine Failure")
-
-        st.subheader("🤖 AI Explanation")
-
-        st.write(
-            "The machine is currently predicted to operate without "
-            "failure based on the given input conditions."
+        st.success(
+            "✅ No Machine Failure"
         )
 
-        st.subheader("🔧 Recommendation")
 
-        st.write(
-            "Continue monitoring the machine parameters and perform "
-            "regular preventive maintenance."
+    # =================================================
+    # AI GENERATED EXPLANATION
+    # =================================================
+
+    st.subheader(
+        "🤖 AI Generated Explanation"
+    )
+
+
+    try:
+
+        ai_response = generate_ai_explanation(
+            prediction,
+            probability,
+            input_data,
+            shap_df
         )
+
+        st.write(ai_response)
+
+
+    except Exception as e:
+
+        st.warning(
+            "AI explanation could not be generated."
+        )
+
+        st.code(str(e))
+
 
     # =================================================
     # SHAP EXPLANATION
@@ -170,153 +418,138 @@ if st.button("Predict"):
 
     if show_shap:
 
-        st.subheader("📊 SHAP Feature Contribution")
+        st.subheader(
+            "📊 SHAP Feature Contribution"
+        )
 
-        try:
 
-            # Create SHAP explainer
-            explainer = shap.TreeExplainer(model)
+        # -------------------------------------------------
+        # Main Contributing Feature
+        # -------------------------------------------------
 
-            shap_values = explainer.shap_values(input_data)
+        main_feature = (
+            shap_df.iloc[0]["Feature"]
+        )
 
-            # Handle different SHAP output formats
-            if isinstance(shap_values, list):
-                shap_values = shap_values[-1]
+        main_value = (
+            shap_df.iloc[0]["SHAP Value"]
+        )
 
-            if len(shap_values.shape) > 1:
-                shap_values = shap_values[0]
 
-            # -------------------------------------------------
-            # SHAP DATAFRAME
-            # -------------------------------------------------
+        st.info(
+            f"🎯 Main Contributing Factor: "
+            f"{main_feature}"
+        )
 
-            shap_df = pd.DataFrame({
-                "Feature": input_data.columns,
-                "SHAP Value": shap_values
-            })
 
-            # Absolute value for ranking
-            shap_df["Impact"] = shap_df["SHAP Value"].abs()
+        # -------------------------------------------------
+        # SHAP Table
+        # -------------------------------------------------
 
-            # Sort highest impact first
-            shap_df = shap_df.sort_values(
-                "Impact",
-                ascending=False
-            ).reset_index(drop=True)
+        display_df = shap_df[
+            ["Feature", "SHAP Value"]
+        ].copy()
 
-            # -------------------------------------------------
-            # MAIN CONTRIBUTING FACTOR
-            # -------------------------------------------------
 
-            main_feature = shap_df.iloc[0]["Feature"]
-            main_value = shap_df.iloc[0]["SHAP Value"]
+        display_df["Effect"] = display_df[
+            "SHAP Value"
+        ].apply(
 
-            st.info(
-                f"🎯 **Main Contributing Factor:** {main_feature}"
+            lambda value:
+
+            "🔴 Increases Failure Risk"
+
+            if value > 0
+
+            else
+
+            "🟢 Reduces Failure Risk"
+
+            if value < 0
+
+            else
+
+            "⚪ Very Low Impact"
+        )
+
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+        # -------------------------------------------------
+        # Risk Factors
+        # -------------------------------------------------
+
+        risk_factors = shap_df[
+            shap_df["SHAP Value"] > 0
+        ]
+
+
+        # -------------------------------------------------
+        # Protective Factors
+        # -------------------------------------------------
+
+        protective_factors = shap_df[
+            shap_df["SHAP Value"] < 0
+        ]
+
+
+        col1, col2 = st.columns(2)
+
+
+        # -------------------------------------------------
+        # Risk Factors Display
+        # -------------------------------------------------
+
+        with col1:
+
+            st.markdown(
+                "### 🔴 Risk Factors"
             )
 
-            # -------------------------------------------------
-            # SHAP TABLE
-            # -------------------------------------------------
 
-            display_df = shap_df[
-                ["Feature", "SHAP Value"]
-            ].copy()
+            if len(risk_factors) > 0:
 
-            display_df["Effect"] = display_df["SHAP Value"].apply(
-                lambda x:
-                "🔴 Increases Failure Risk"
-                if x > 0
-                else "🟢 Reduces Failure Risk"
-                if x < 0
-                else "⚪ Very Low Impact"
-            )
+                for _, row in risk_factors.iterrows():
 
-            st.dataframe(
-                display_df,
-                use_container_width=True,
-                hide_index=True
-            )
-
-            # -------------------------------------------------
-            # RISK FACTORS
-            # -------------------------------------------------
-
-            risk_factors = shap_df[
-                shap_df["SHAP Value"] > 0
-            ]
-
-            protective_factors = shap_df[
-                shap_df["SHAP Value"] < 0
-            ]
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-
-                st.markdown("### 🔴 Risk Factors")
-
-                if len(risk_factors) > 0:
-
-                    for _, row in risk_factors.iterrows():
-
-                        st.write(
-                            f"• **{row['Feature']}** "
-                            f"({row['SHAP Value']:.4f})"
-                        )
-
-                else:
-
-                    st.write("No major risk factors.")
-
-            with col2:
-
-                st.markdown("### 🟢 Protective Factors")
-
-                if len(protective_factors) > 0:
-
-                    for _, row in protective_factors.iterrows():
-
-                        st.write(
-                            f"• **{row['Feature']}** "
-                            f"({row['SHAP Value']:.4f})"
-                        )
-
-                else:
-
-                    st.write("No protective factors identified.")
-
-            # -------------------------------------------------
-            # SIMPLE SHAP SUMMARY
-            # -------------------------------------------------
-
-            st.markdown("### 💡 SHAP Summary")
-
-            if main_value > 0:
-
-                st.write(
-                    f"**{main_feature}** has the highest contribution "
-                    "towards the current machine failure prediction."
-                )
-
-            elif main_value < 0:
-
-                st.write(
-                    f"**{main_feature}** has the strongest contribution "
-                    "towards reducing the failure prediction."
-                )
+                    st.write(
+                        f"• **{row['Feature']}** "
+                        f"({row['SHAP Value']:.4f})"
+                    )
 
             else:
 
                 st.write(
-                    "The current input parameters have relatively "
-                    "low SHAP contribution."
+                    "No major risk factors."
                 )
 
-        except Exception as e:
 
-            st.warning(
-                "SHAP explanation could not be generated."
+        # -------------------------------------------------
+        # Protective Factors Display
+        # -------------------------------------------------
+
+        with col2:
+
+            st.markdown(
+                "### 🟢 Protective Factors"
             )
 
-            st.code(str(e))
+
+            if len(protective_factors) > 0:
+
+                for _, row in protective_factors.iterrows():
+
+                    st.write(
+                        f"• **{row['Feature']}** "
+                        f"({row['SHAP Value']:.4f})"
+                    )
+
+            else:
+
+                st.write(
+                    "No protective factors identified."
+                )
