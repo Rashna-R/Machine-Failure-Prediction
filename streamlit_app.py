@@ -18,6 +18,23 @@ st.set_page_config(
 
 
 # ============================================================
+# SESSION STATE
+# ============================================================
+
+if "prediction" not in st.session_state:
+    st.session_state.prediction = None
+
+if "probability" not in st.session_state:
+    st.session_state.probability = None
+
+if "shap_df" not in st.session_state:
+    st.session_state.shap_df = None
+
+if "ai_explanation" not in st.session_state:
+    st.session_state.ai_explanation = None
+
+
+# ============================================================
 # LOAD TRAINED MODEL
 # ============================================================
 
@@ -334,32 +351,9 @@ if st.button(
         )[0][1]
 
 
-        # ----------------------------------------------------
-        # Display Failure Probability
-        # ----------------------------------------------------
-
-        st.subheader("Failure Probability")
-
-        st.write(
-            f"### {probability * 100:.2f}%"
-        )
-
-
-        # ----------------------------------------------------
-        # Display Prediction
-        # ----------------------------------------------------
-
-        if prediction == 1:
-
-            st.error(
-                "⚠️ Machine Failure Detected"
-            )
-
-        else:
-
-            st.success(
-                "✅ No Machine Failure"
-            )
+        # Save prediction in session state
+        st.session_state.prediction = prediction
+        st.session_state.probability = probability
 
 
         # ====================================================
@@ -410,44 +404,13 @@ if st.button(
             ).reset_index(drop=True)
 
 
-            # ------------------------------------------------
-            # SHAP Toggle
-            # ------------------------------------------------
-
-            show_shap = st.toggle(
-                "Show SHAP Feature Contributions"
-            )
-
-
-            if show_shap:
-
-                st.subheader(
-                    "SHAP Feature Contributions"
-                )
-
-                display_shap = shap_df[
-                    ["Feature", "SHAP Value"]
-                ].copy()
-
-                display_shap["SHAP Value"] = (
-                    display_shap["SHAP Value"]
-                    .round(4)
-                )
-
-                st.dataframe(
-                    display_shap,
-                    use_container_width=True,
-                    hide_index=True
-                )
+            # Save SHAP result in session state
+            st.session_state.shap_df = shap_df.copy()
 
 
             # =================================================
             # GEMINI AI EXPLANATION
             # =================================================
-
-            st.subheader(
-                "🤖 AI Generated Explanation"
-            )
 
             with st.spinner(
                 "Generating AI explanation..."
@@ -463,12 +426,14 @@ if st.button(
                 )
 
 
-            st.markdown(
-                ai_explanation
-            )
+            # Save AI explanation in session state
+            st.session_state.ai_explanation = ai_explanation
 
 
         except Exception as shap_error:
+
+            st.session_state.shap_df = None
+            st.session_state.ai_explanation = None
 
             st.warning(
                 "Prediction completed, but SHAP/AI explanation "
@@ -481,4 +446,90 @@ if st.button(
         st.error(
             "Prediction failed. Please check the model "
             "and input features."
+        )
+
+
+# ============================================================
+# DISPLAY PREDICTION RESULT
+# ============================================================
+
+if st.session_state.prediction is not None:
+
+    prediction = st.session_state.prediction
+    probability = st.session_state.probability
+
+
+    # --------------------------------------------------------
+    # Display Failure Probability
+    # --------------------------------------------------------
+
+    st.subheader("Failure Probability")
+
+    st.write(
+        f"### {probability * 100:.2f}%"
+    )
+
+
+    # --------------------------------------------------------
+    # Display Prediction
+    # --------------------------------------------------------
+
+    if prediction == 1:
+
+        st.error(
+            "⚠️ Machine Failure Detected"
+        )
+
+    else:
+
+        st.success(
+            "✅ No Machine Failure"
+        )
+
+
+    # ========================================================
+    # SHAP TOGGLE
+    # ========================================================
+
+    if st.session_state.shap_df is not None:
+
+        show_shap = st.toggle(
+            "Show SHAP Feature Contributions"
+        )
+
+
+        if show_shap:
+
+            st.subheader(
+                "SHAP Feature Contributions"
+            )
+
+            display_shap = st.session_state.shap_df[
+                ["Feature", "SHAP Value"]
+            ].copy()
+
+            display_shap["SHAP Value"] = (
+                display_shap["SHAP Value"]
+                .round(4)
+            )
+
+            st.dataframe(
+                display_shap,
+                use_container_width=True,
+                hide_index=True
+            )
+
+
+    # ========================================================
+    # GEMINI AI EXPLANATION
+    # ========================================================
+
+    if st.session_state.ai_explanation is not None:
+
+        st.subheader(
+            "🤖 AI Generated Explanation"
+        )
+
+        st.markdown(
+            st.session_state.ai_explanation
         )
