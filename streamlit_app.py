@@ -252,7 +252,9 @@ maintenance recommendation based only on the available information.
 
             temperature=0.3,
 
-            max_completion_tokens=500
+            max_completion_tokens=1200
+            reasoning_effort="low",
+            include_reasoning=False
         )
 
 
